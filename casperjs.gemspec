@@ -20,4 +20,6 @@ high-level functions, methods & syntaxic sugar for doing common tasks."
   s.executables         = [ "casperjs" ]
   s.license             = "MIT"
   s.requirements        = [ "PhantomJS v1.7" ]
+
+  s.add_runtime_dependency = "phantomjs-binaries"
 end
