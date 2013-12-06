@@ -21,5 +21,5 @@ high-level functions, methods & syntaxic sugar for doing common tasks."
   s.license             = "MIT"
   s.requirements        = [ "PhantomJS v1.7" ]
 
-  s.add_runtime_dependency "phantomjs-binaries", "1.9.2.1"
+  s.add_runtime_dependency "phantomjs-binaries", "1.9.2.2"
 end
