@@ -28,22 +28,40 @@
  *
  */
 
-/*global console phantom require*/
-/*jshint maxstatements:30 maxcomplexity:10*/
+/*global process, console, phantom, slimer, require:true*/
+/*jshint maxstatements:34, maxcomplexity:10*/
+
+// node check
+if ('process' in this && process.title === "node") {
+    console.error('CasperJS cannot be executed within a nodejs environment');
+    process.exit(1);
+}
 
 // phantom check
-if (!phantom) {
+if (!('phantom' in this)) {
     console.error('CasperJS needs to be executed in a PhantomJS environment http://phantomjs.org/');
 }
 
 // Common polyfills
 if (typeof Function.prototype.bind !== "function") {
-    Function.prototype.bind = function(scope) {
+    // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Function/bind#Compatibility
+    Function.prototype.bind = function (oThis) {
         "use strict";
-        var _function = this;
-        return function() {
-            return _function.apply(scope, arguments);
-        };
+        /* jshint -W055 */
+        if (typeof this !== "function") {
+            // closest thing possible to the ECMAScript 5 internal IsCallable function
+            throw new TypeError("Function.prototype.bind - what is trying to be bound is not callable");
+        }
+        var aArgs = Array.prototype.slice.call(arguments, 1),
+            fToBind = this,
+            fNOP = function() {},
+            fBound = function() {
+              return fToBind.apply(this instanceof fNOP && oThis ? this : oThis,
+                                   aArgs.concat(Array.prototype.slice.call(arguments)));
+            };
+        fNOP.prototype = this.prototype;
+        fBound.prototype = new fNOP();
+        return fBound;
     };
 }
 
@@ -69,12 +87,16 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
     }
 
     function __die(message) {
-        console.error(message);
+        if (message) {
+            console.error(message);
+        }
         phantom.exit(1);
     }
 
     function __terminate(message) {
-        console.log(message);
+        if (message) {
+            console.log(message);
+        }
         phantom.exit();
     }
 
@@ -82,21 +104,24 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
         // required version check
         if (version.major !== 1) {
             return __die('CasperJS needs PhantomJS v1.x');
-        }
-        if (version.minor < 8) {
+        } if (version.minor < 8) {
             return __die('CasperJS needs at least PhantomJS v1.8 or later.');
         }
-        if (version.patch < 1) {
+        if (version.minor === 8 && version.patch < 1) {
             return __die('CasperJS needs at least PhantomJS v1.8.1 or later.');
         }
     })(phantom.version);
 
-    // Hooks in default phantomjs error handler to print a hint when a possible
-    // casperjs command misuse is detected.
+    // Hooks in default phantomjs error handler
     phantom.onError = function onPhantomError(msg, trace) {
         phantom.defaultErrorHandler.apply(phantom, arguments);
+        // print a hint when a possible casperjs command misuse is detected
         if (msg.indexOf("ReferenceError: Can't find variable: casper") === 0) {
             console.error('Hint: you may want to use the `casperjs test` command.');
+        }
+        // exits on syntax error
+        if (msg.indexOf('SyntaxError: Parse error') === 0) {
+            __die();
         }
     };
 
@@ -109,7 +134,8 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
         }
         if (!fs.hasOwnProperty('dirname')) {
             fs.dirname = function dirname(path) {
-                return path.replace(/\\/g, '/').replace(/\/[^\/]*$/, '');
+                if (!path) return undefined;
+                return path.toString().replace(/\\/g, '/').replace(/\/[^\/]*$/, '');
             };
         }
         if (!fs.hasOwnProperty('isWindows')) {
@@ -122,7 +148,7 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
             fs.pathJoin = fs.joinPath;
         } else if (!fs.hasOwnProperty('pathJoin')) {
             fs.pathJoin = function pathJoin() {
-                return Array.prototype.join.call(arguments, this.separator);
+                return Array.prototype.join.call(arguments, '/');
             };
         }
         return fs;
@@ -148,51 +174,90 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
      * Prints CasperJS help.
      */
     function printHelp() {
-        var phantomVersion = [phantom.version.major, phantom.version.minor, phantom.version.patch].join('.');
+        var engine = phantom.casperEngine === 'slimerjs' ? slimer : phantom;
+        var version = [engine.version.major, engine.version.minor, engine.version.patch].join('.');
         return __terminate([
             'CasperJS version ' + phantom.casperVersion.toString() +
-            ' at ' + phantom.casperPath + ', using PhantomJS version ' + phantomVersion,
+            ' at ' + phantom.casperPath + ', using ' + phantom.casperEngine + ' version ' + version,
             fs.read(fs.pathJoin(phantom.casperPath, 'bin', 'usage.txt'))
         ].join('\n'))
     }
 
     /**
      * Patched require to allow loading of native casperjs modules.
-     * Every casperjs native module have to first call this function in order to
+     * Every casperjs module have to first call this function in order to
      * load a native casperjs module:
      *
      *     var require = patchRequire(require);
      *     var utils = require('utils');
+     *
+     * Useless for SlimerJS
      */
     function patchRequire(require) {
         if (require.patched) {
             return require;
         }
-        function casperBuiltinPath(path) {
-            var absPath = fs.pathJoin(phantom.casperPath, 'modules', path + '.js');
-            return fs.isFile(absPath) ? absPath : undefined;
-        }
-        function localModulePath(path) {
-            var baseDir = phantom.casperScriptBaseDir || fs.workingDirectory;
-            var paths = [
-                fs.absolute(fs.pathJoin(baseDir, path)),
-                fs.absolute(fs.pathJoin(baseDir, path + '.js'))
-            ];
-            return paths.filter(function(path) {
-                return fs.isFile(path);
-            }).pop();
-        }
-        var patchedRequire = function patchedRequire(path) {
-            var moduleFilePath = casperBuiltinPath(path);
-            if (moduleFilePath) {
-                return require(moduleFilePath);
+        function fromPackageJson(module, dir) {
+            var pkgPath, pkgContents, pkg;
+            pkgPath = fs.pathJoin(dir, module, 'package.json');
+            if (!fs.exists(pkgPath)) {
+                return;
             }
-            moduleFilePath = localModulePath(path);
-            if (moduleFilePath) {
-                return require(moduleFilePath);
+            pkgContents = fs.read(pkgPath);
+            if (!pkgContents) {
+                return;
             }
             try {
-                return require(path);
+                pkg = JSON.parse(pkgContents);
+            } catch (e) {
+                return;
+            }
+            if (typeof pkg === "object" && pkg.main) {
+                return fs.absolute(fs.pathJoin(dir, module, pkg.main));
+            }
+        }
+        function resolveFile(path, dir) {
+            var extensions = ['js', 'coffee', 'json'];
+            var basenames = [path, path + '/index'];
+            var paths = [];
+            var nodejsScript = fromPackageJson(path, dir);
+            if (nodejsScript) {
+                return nodejsScript;
+            }
+            basenames.forEach(function(basename) {
+                paths.push(fs.absolute(fs.pathJoin(dir, basename)));
+                extensions.forEach(function(extension) {
+                    paths.push(fs.absolute(fs.pathJoin(dir, [basename, extension].join('.'))));
+                });
+            });
+            for (var i = 0; i < paths.length; i++) {
+                if (fs.isFile(paths[i])) {
+                    return paths[i];
+                }
+            }
+            return null;
+        }
+        function getCurrentScriptRoot() {
+            if ((phantom.casperScriptBaseDir || "").indexOf(fs.workingDirectory) === 0) {
+                return phantom.casperScriptBaseDir;
+            }
+            return fs.absolute(fs.pathJoin(fs.workingDirectory, phantom.casperScriptBaseDir));
+        }
+        function casperBuiltinPath(path) {
+            return resolveFile(path, fs.pathJoin(phantom.casperPath, 'modules'));
+        }
+        function nodeModulePath(path) {
+            return resolveFile(path, fs.pathJoin(getCurrentScriptRoot(), 'node_modules'));
+        }
+        function localModulePath(path) {
+            return resolveFile(path, phantom.casperScriptBaseDir || fs.workingDirectory);
+        }
+        var patchedRequire = function patchedRequire(path) {
+            try {
+                return require(casperBuiltinPath(path) ||
+                               nodeModulePath(path)    ||
+                               localModulePath(path)   ||
+                               path);
             } catch (e) {
                 throw new CasperError("Can't find module " + path);
             }
@@ -207,43 +272,52 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
     /**
      * Initializes the CasperJS Command Line Interface.
      */
-    function initCasperCli() {
+    function initCasperCli(casperArgs) {
+        /* jshint maxcomplexity:99 */
         var baseTestsPath = fs.pathJoin(phantom.casperPath, 'tests');
 
-        if (!!phantom.casperArgs.options.version) {
+        function setScriptBaseDir(scriptName) {
+            var dir = fs.dirname(scriptName);
+            if (dir === scriptName) {
+                dir = '.';
+            }
+            phantom.casperScriptBaseDir = dir;
+        }
+
+        if (!!casperArgs.options.version) {
             return __terminate(phantom.casperVersion.toString())
-        } else if (phantom.casperArgs.get(0) === "test") {
+        } else if (casperArgs.get(0) === "test") {
             phantom.casperScript = fs.absolute(fs.pathJoin(baseTestsPath, 'run.js'));
             phantom.casperTest = true;
-            phantom.casperArgs.drop("test");
-            phantom.casperScriptBaseDir = fs.dirname(phantom.casperArgs.get(0));
-        } else if (phantom.casperArgs.get(0) === "selftest") {
+            casperArgs.drop("test");
+            setScriptBaseDir(casperArgs.get(0));
+        } else if (casperArgs.get(0) === "selftest") {
             phantom.casperScript = fs.absolute(fs.pathJoin(baseTestsPath, 'run.js'));
             phantom.casperSelfTest = phantom.casperTest = true;
-            phantom.casperArgs.options.includes = fs.pathJoin(baseTestsPath, 'selftest.js');
-            if (phantom.casperArgs.args.length <= 1) {
-                phantom.casperArgs.args.push(fs.pathJoin(baseTestsPath, 'suites'));
+            casperArgs.options.includes = fs.pathJoin(baseTestsPath, 'selftest.js');
+            if (casperArgs.args.length <= 1) {
+                casperArgs.args.push(fs.pathJoin(baseTestsPath, 'suites'));
             }
-            phantom.casperArgs.drop("selftest");
-            phantom.casperScriptBaseDir = fs.dirname(phantom.casperArgs.get(0) || fs.dirname(phantom.casperScript));
-        } else if (phantom.casperArgs.args.length === 0 || !!phantom.casperArgs.options.help) {
+            casperArgs.drop("selftest");
+            phantom.casperScriptBaseDir = fs.dirname(casperArgs.get(1) || fs.dirname(phantom.casperScript));
+        } else if (casperArgs.args.length === 0 || !!casperArgs.options.help) {
             return printHelp();
         }
 
         if (!phantom.casperScript) {
-            phantom.casperScript = phantom.casperArgs.get(0);
+            phantom.casperScript = casperArgs.get(0);
         }
 
-        if (!fs.isFile(phantom.casperScript)) {
+        if (phantom.casperScript !== "/dev/stdin" && !fs.isFile(phantom.casperScript)) {
             return __die('Unable to open file: ' + phantom.casperScript);
         }
 
         if (!phantom.casperScriptBaseDir) {
-            phantom.casperScriptBaseDir = fs.absolute(fs.dirname(phantom.casperScript));
+            setScriptBaseDir(phantom.casperScript);
         }
 
         // filter out the called script name from casper args
-        phantom.casperArgs.drop(phantom.casperScript);
+        casperArgs.drop(phantom.casperScript);
     }
 
     // CasperJS version, extracted from package.json - see http://semver.org/
@@ -278,16 +352,37 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
         };
     })(phantom.casperPath);
 
-    // patch require
-    global.__require = require;
-    global.patchRequire = patchRequire; // must be called in every casperjs module as of 1.1
-    global.require = patchRequire(global.require);
+    if ("slimer" in global) {
+        // for SlimerJS, use the standard API to declare directories
+        // where to search modules
+        require.paths.push(fs.pathJoin(phantom.casperPath, 'modules'));
+        require.paths.push(fs.workingDirectory);
+
+        // declare a dummy patchRequire function
+        require.globals.patchRequire = global.patchRequire = function(req) { return req;};
+        require.globals.CasperError = CasperError;
+        phantom.casperEngine = "slimerjs";
+    }
+    else {
+        // patch require
+        global.__require = require;
+        global.patchRequire = patchRequire; // must be called in every casperjs module as of 1.1
+        global.require = patchRequire(global.require);
+        phantom.casperEngine = "phantomjs";
+    }
 
     // casper cli args
     phantom.casperArgs = require('cli').parse(phantomArgs);
 
     if (true === phantom.casperArgs.get('cli')) {
-        initCasperCli();
+        initCasperCli(phantom.casperArgs);
+    }
+
+    if ("slimer" in global && phantom.casperScriptBaseDir) {
+        // initCasperCli has set casperScriptBaseDir
+        // use it instead of fs.workingDirectory
+        require.paths.pop();
+        require.paths.push(phantom.casperScriptBaseDir);
     }
 
     // casper loading status flag
@@ -297,4 +392,4 @@ CasperError.prototype = Object.getPrototypeOf(new Error());
     if (phantom.casperScript && !phantom.injectJs(phantom.casperScript)) {
         return __die('Unable to load script ' + phantom.casperScript + '; check file syntax');
     }
-})(window, phantom);
+})(this, phantom);

@@ -1,5 +1,5 @@
 /*jshint strict:false*/
-/*global CasperError console phantom require*/
+/*global CasperError, console, phantom, require*/
 
 /**
  * Takes provided terms passed as arguments and query google for the number of
@@ -40,9 +40,9 @@ casper.echo("Let the match begin between \"" + (terms.join('", "')) + "\"!");
 casper.start("http://google.fr/");
 
 casper.each(terms, function(casper, term, i) {
-    this.echo('Fecthing score for ' + term);
+    this.echo('Fetching score for ' + term);
     this.then(function() {
-        this.fill('form[action="/search"]', {q: term}, true);
+        this.fill('form[action="/search"]', {q: '"' + term + '"'}, true);
     });
     this.then(function() {
         var score = this.fetchScore();

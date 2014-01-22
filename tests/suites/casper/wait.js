@@ -77,7 +77,7 @@ casper.test.begin('waitForSelector() tests', 1, function(test) {
     });
 });
 
-casper.test.begin('waitForText() tests', 2, function(test) {
+casper.test.begin('waitForText() tests', 3, function(test) {
     casper.start('tests/site/waitFor.html');
 
     casper.waitForText('<li>four</li>', function() {
@@ -87,9 +87,29 @@ casper.test.begin('waitForText() tests', 2, function(test) {
     });
 
     casper.reload().waitForText(/four/i, function() {
-        this.test.pass('Casper.waitForText() can wait for regexp');
+        test.pass('Casper.waitForText() can wait for regexp');
     }, function() {
-        this.test.fail('Casper.waitForText() can wait for regexp');
+        test.fail('Casper.waitForText() can wait for regexp');
+    });
+
+    casper.reload().waitForText('Voilà', function() {
+        test.pass('Casper.waitForText() can wait for decoded HTML text');
+    }, function() {
+        test.fail('Casper.waitForText() can wait for decoded HTML text');
+    }, 1000);
+
+    casper.run(function() {
+        test.done();
+    });
+});
+
+casper.test.begin('waitForSelectorTextChange() tests', 1, function(test) {
+    casper.start('tests/site/waitFor.html');
+
+    casper.waitForSelectorTextChange('#textChange', function() {
+        test.pass('Casper.waitForSelectorTextChange() can wait for text on a selector to change');
+    }, function() {
+        test.fail('Casper.waitForSelectorTextChange() can wait for text on a selector to change');
     });
 
     casper.run(function() {
@@ -97,13 +117,51 @@ casper.test.begin('waitForText() tests', 2, function(test) {
     });
 });
 
-casper.test.begin('waitUntilVisible() tests', 1, function(test) {
+casper.test.begin('waitUntilVisible() tests', 2, function(test) {
     casper.start('tests/site/waitFor.html');
 
     casper.waitUntilVisible('li:nth-child(4)', function() {
         test.pass('Casper.waitUntilVisible() waits for a selector being visible');
     }, function() {
         test.fail('Casper.waitUntilVisible() waits for a selector being visible');
+    });
+
+    casper.waitUntilVisible('p', function() {
+        test.pass('Casper.waitUntilVisible() waits for a selector being visible');
+    }, function() {
+        test.fail('Casper.waitUntilVisible() waits for a selector being visible');
+    });
+
+    casper.run(function() {
+        test.done();
+    });
+});
+
+casper.test.begin('waitForUrl() regexp tests', 1, function(test) {
+    casper.start().thenEvaluate(function() {
+        setTimeout(function() {
+            document.location = './form.html';
+        }, 100);
+    });
+
+    casper.waitForUrl(/form\.html$/, function() {
+        test.pass('Casper.waitForUrl() waits for a given regexp url');
+    });
+
+    casper.run(function() {
+        test.done();
+    });
+});
+
+casper.test.begin('waitForUrl() string tests', 1, function(test) {
+    casper.start().thenEvaluate(function() {
+        setTimeout(function() {
+            document.location = './form.html';
+        }, 100);
+    });
+
+    casper.waitForUrl('form.html', function() {
+        test.pass('Casper.waitForUrl() waits for a given string url');
     });
 
     casper.run(function() {

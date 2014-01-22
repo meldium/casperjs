@@ -28,7 +28,7 @@
  *
  */
 
-/*global patchRequire*/
+/*global patchRequire, require:true*/
 
 var require = patchRequire(require);
 var utils = require('utils');
@@ -59,9 +59,10 @@ responseHeaders.prototype.get = function get(name){
 };
 
 /**
- * Augment the response with proper prototypes
+ * Augments the response with proper prototypes.
  *
- * @param mixed response    Phantom response or undefined (generally with local files)
+ * @param  Mixed  response  Phantom response or undefined (generally with local files)
+ * @return Object           Augmented response
  */
 exports.augmentResponse = function(response) {
     "use strict";
@@ -70,4 +71,5 @@ exports.augmentResponse = function(response) {
         return;
     }
     response.headers.__proto__ = responseHeaders.prototype;
+    return response;
 };

@@ -28,11 +28,12 @@
  *
  */
 
-/*global exports console patchRequire*/
+/*global exports, console, patchRequire, require:true*/
 
 var require = patchRequire(require);
 var fs = require('fs');
 var utils = require('utils');
+var env = require('system').env;
 
 exports.create = function create(type) {
     "use strict";
@@ -66,7 +67,9 @@ var Colorizer = function Colorizer() {
         'GREEN_BAR': { fg: 'white', bg: 'green', bold: true },
         'RED_BAR':   { fg: 'white', bg: 'red', bold: true },
         'INFO_BAR':  { bg: 'cyan', fg: 'white', bold: true },
-        'WARN_BAR':  { bg: 'yellow', fg: 'white', bold: true }
+        'WARN_BAR':  { bg: 'yellow', fg: 'white', bold: true },
+        'SKIP':      { fg: 'magenta', bold: true },
+        'SKIP_BAR':  { bg: 'magenta', fg: 'white', bold: true }
     };
 
     /**
@@ -77,7 +80,7 @@ var Colorizer = function Colorizer() {
      * @return  String
      */
     this.colorize = function colorize(text, styleName, pad) {
-        if (fs.isWindows() || !(styleName in styles)) {
+        if ((fs.isWindows() && !env['ANSICON']) || !(styleName in styles)) {
             return text;
         }
         return this.format(text, styles[styleName], pad);
@@ -91,7 +94,7 @@ var Colorizer = function Colorizer() {
      * @return String
      */
     this.format = function format(text, style, pad) {
-        if (fs.isWindows() || !utils.isObject(style)) {
+        if ((fs.isWindows() && !env['ANSICON']) || !utils.isObject(style)) {
             return text;
         }
         var codes = [];
@@ -102,7 +105,7 @@ var Colorizer = function Colorizer() {
             codes.push(background[style.bg]);
         }
         for (var option in options) {
-            if (style[option] === true) {
+            if (option in style && style[option] === true) {
                 codes.push(options[option]);
             }
         }
