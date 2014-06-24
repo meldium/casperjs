@@ -1267,7 +1267,8 @@ Casper.prototype.injectClientUtils = function injectClientUtils() {
     // These are not the lines I'm the most proud of in my life, but it works.
     /*global __options*/
     this.page.evaluate(function() {
-        window.__utils__ = new window.ClientUtils(__options);
+        var clientUtilsCtor = window.ClientUtils || exports.ClientUtils;
+        window.__utils__ = new clientUtilsCtor(__options);
     }.toString().replace('__options', JSON.stringify(this.options)));
 };
 
